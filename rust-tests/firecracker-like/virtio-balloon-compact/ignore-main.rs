@@ -1,3 +1,9 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+//
+// Try with: rmc ignore-main.rs -- --unwind 3 --unwinding-assertions --pointer-check --object-bits 11
+// With kissat as the solver (--external-sat-solver /path/to/kissat) this takes ~5mins
+
 pub const MAX_PAGE_COMPACT_BUFFER: usize = 2048;
 
 pub(crate) fn compact_page_frame_numbers(v: &mut [u32]) -> Vec<(u32, u32)> {
@@ -52,7 +58,7 @@ fn __nondet<T>() -> T {
 }
 
 fn main() {
-    let mut input = vec![0; 3];
+    let mut input = vec![0; 2];
     for i in 0..input.len() {
         input[i] = __nondet();
         if input[i] == u32::MAX {
