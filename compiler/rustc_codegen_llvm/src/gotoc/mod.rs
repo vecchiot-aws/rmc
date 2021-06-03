@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 use bitflags::_core::any::Any;
@@ -66,13 +68,38 @@ impl<'tcx> GotocCtx<'tcx> {
         self.current_fn_mut().current_bb = None;
     }
 
+    fn get_pretty_name(&self, lc: &Local, pretty_names: &HashMap<Local, Option<String>>) -> Option<String> {
+        for bb in self.mir().basic_blocks() {
+            for stmt in bb.statements {
+                match stmt.kind {
+                    rustc_middle::mir::StatementKind::Assign(assgn) => {
+                        let (lhs, rhs) = *assgn;
+                        if lhs.local == lc {
+                            match rhs {
+                                rustc_middle::mir::Rvalue::Use(op) => match op {
+                                    rustc_middle::mir::Operand::Copy(pl) => {}
+                                    rustc_middle::mir::Operand::Move(pl) => {}
+                                    rustc_middle::mir::Operand::Constant(_) => {}
+                                }
+                                rustc_middle::mir::Rvalue::Ref(_, _, _) => {}
+                                _ => {}
+                            }
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+
     fn codegen_declare_variables(&mut self) {
         let mir = self.mir();
         let ldecls = mir.local_decls();
+        let mut pretty_names: HashMap<Local, Option<String>> = HashMap::new();
         ldecls.indices().for_each(|lc| {
-            let base_name = match self.find_debug_info(&lc) {
-                None => format!("var_{}", lc.index()),
-                Some(info) => format!("{}", info.name),
+            let (base_name, pretty_name) = match self.find_debug_info(&lc) {
+                None => (format!("var_{}", lc.index()), None),
+                Some(info) => (format!("{}", info.name), Some(format!("{}", info.name))),
             };
             let name = self.codegen_var_name(&lc);
             let ldata = &ldecls[lc];
@@ -81,6 +108,38 @@ impl<'tcx> GotocCtx<'tcx> {
             let loc = self.codegen_span2(&ldata.source_info.span);
             let sym =
                 Symbol::variable(name, base_name, t, self.codegen_span2(&ldata.source_info.span));
+            // TODO(TDELV): add pretty name here!
+            let pretty_name = pretty_name.or
+            match pretty_name {
+                Some(pretty_name) => sym.with_pretty_name(&pretty_name),
+                None => {
+                    let mut sym = sym;
+                    'outer: for bb in self.mir().basic_blocks() {
+                        for stmt in bb.statements {
+                            match stmt.kind {
+                                rustc_middle::mir::StatementKind::Assign(assgn) => {
+                                    let (lhs, rhs) = *assgn;
+                                    if lhs.local == lc {
+                                        match rhs {
+                                            rustc_middle::mir::Rvalue::Use(op) => match op {
+                                                rustc_middle::mir::Operand::Copy(pl) => {}
+                                                rustc_middle::mir::Operand::Move(pl) => {}
+                                                rustc_middle::mir::Operand::Constant(_) => {}
+                                            }
+                                            rustc_middle::mir::Rvalue::Ref(_, _, _) => {}
+                                            _ => {}
+                                        }
+                                    }
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                    sym
+                },
+            };
+            pretty_names.insert(lc, pretty_name.clone());
+            // let sym = sym.with_pretty_name("TDELVx");
             let sym_e = sym.to_expr();
             self.symbol_table.insert(sym);
 

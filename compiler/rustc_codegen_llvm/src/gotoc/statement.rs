@@ -424,6 +424,7 @@ impl<'tcx> GotocCtx<'tcx> {
                         .goto_expr
                         .assign(self.codegen_rvalue(r).cast_to(Type::c_bool()), Location::none())
                 } else {
+                    // TDELV look here
                     self.codegen_place(l).goto_expr.assign(self.codegen_rvalue(r), Location::none())
                 }
             }

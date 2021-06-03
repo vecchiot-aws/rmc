@@ -35,7 +35,7 @@ fn test_three_args() {
 fn test_env() {
     let x = 3;
     let r = takes_three_args(|a, b, c| a + b + c + x);
-    assert!(r == 9);
+    assert!(r == 8);
 }
 
 fn main() {
