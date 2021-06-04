@@ -85,9 +85,16 @@ impl<'tcx> GotocCtx<'tcx> {
                                 rustc_middle::mir::Operand::Constant(_) => {}
                                 _ => {}
                             },
-                            rustc_middle::mir::Rvalue::Ref(_, _, pl) => {
-                                return Some(("ref".to_string(), pl.local));
-                            }
+                            rustc_middle::mir::Rvalue::Ref(_, kind, pl) => match kind {
+                                rustc_middle::mir::BorrowKind::Shared
+                                | rustc_middle::mir::BorrowKind::Shallow
+                                | rustc_middle::mir::BorrowKind::Unique => {
+                                    return Some(("ref".to_string(), pl.local));
+                                }
+                                rustc_middle::mir::BorrowKind::Mut { .. } => {
+                                    return Some(("mutref".to_string(), pl.local));
+                                }
+                            },
                             _ => {}
                         }
                     }
@@ -98,7 +105,11 @@ impl<'tcx> GotocCtx<'tcx> {
         return None;
     }
 
-    fn get_local_names(&self, lc: &Local) -> (String, String, Option<String>) {
+    fn get_local_names(
+        &self,
+        lc: &Local,
+        pretty_names: &mut HashMap<Local, String>,
+    ) -> (String, String, Option<String>) {
         let name = self.codegen_var_name(lc);
         match self.find_debug_info(lc) {
             None => {
@@ -108,14 +119,14 @@ impl<'tcx> GotocCtx<'tcx> {
                     None => None,
                     Some((op, parent_name)) => {
                         let pretty_name = format!("{}_{}_{}", parent_name, op, lc.index());
-                        pretty_names.insert(lc, pretty_name.clone());
+                        pretty_names.insert(*lc, pretty_name.clone());
                         Some(pretty_name)
                     }
                 };
                 (name, format!("var_{}", lc.index()), pretty_name)
             }
             Some(info) => {
-                pretty_names.insert(lc, format!("{}", info.name));
+                pretty_names.insert(*lc, format!("{}", info.name));
                 (name, format!("{}", info.name), Some(format!("{}", info.name)))
             }
         }
@@ -126,7 +137,7 @@ impl<'tcx> GotocCtx<'tcx> {
         let ldecls = mir.local_decls();
         let mut pretty_names: HashMap<Local, String> = HashMap::new();
         ldecls.indices().for_each(|lc| {
-            let (name, base_name, pretty_name) = self.get_local_names(&lc);
+            let (name, base_name, pretty_name) = self.get_local_names(&lc, &mut pretty_names);
             let ldata = &ldecls[lc];
             let t = self.monomorphize(ldata.ty);
             let t = self.codegen_ty(t);
