@@ -167,7 +167,6 @@ impl Symbol {
             .with_is_thread_local(true)
             .with_is_lvalue(true)
             .with_is_state_var(true)
-            .with_pretty_name("TDELVx")
     }
 
     pub fn struct_type(name: &str, components: Vec<DatatypeComponent>) -> Symbol {

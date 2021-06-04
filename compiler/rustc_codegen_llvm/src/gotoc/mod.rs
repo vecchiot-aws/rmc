@@ -13,7 +13,7 @@ use rustc_hir::def_id::DefId;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::middle::cstore::{EncodedMetadata, MetadataLoaderDyn};
 use rustc_middle::mir::mono::{CodegenUnit, MonoItem};
-use rustc_middle::mir::{BasicBlock, BasicBlockData, Body, HasLocalDecls};
+use rustc_middle::mir::{BasicBlock, BasicBlockData, Body, HasLocalDecls, Local};
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, Instance, TyCtxt};
@@ -68,26 +68,55 @@ impl<'tcx> GotocCtx<'tcx> {
         self.current_fn_mut().current_bb = None;
     }
 
-    fn get_pretty_name(&self, lc: &Local, pretty_names: &HashMap<Local, Option<String>>) -> Option<String> {
+    fn get_parent_local(&self, lc: &Local) -> Option<(String, Local)> {
         for bb in self.mir().basic_blocks() {
-            for stmt in bb.statements {
-                match stmt.kind {
-                    rustc_middle::mir::StatementKind::Assign(assgn) => {
-                        let (lhs, rhs) = *assgn;
-                        if lhs.local == lc {
-                            match rhs {
-                                rustc_middle::mir::Rvalue::Use(op) => match op {
-                                    rustc_middle::mir::Operand::Copy(pl) => {}
-                                    rustc_middle::mir::Operand::Move(pl) => {}
-                                    rustc_middle::mir::Operand::Constant(_) => {}
+            for stmt in &bb.statements {
+                if let rustc_middle::mir::StatementKind::Assign(assgn) = &stmt.kind {
+                    let (lhs, rhs) = &**assgn;
+                    if lhs.local == *lc {
+                        match rhs {
+                            rustc_middle::mir::Rvalue::Use(op) => match op {
+                                rustc_middle::mir::Operand::Copy(pl) => {
+                                    return Some(("copy".to_string(), pl.local));
                                 }
-                                rustc_middle::mir::Rvalue::Ref(_, _, _) => {}
+                                rustc_middle::mir::Operand::Move(pl) => {
+                                    return Some(("move".to_string(), pl.local));
+                                }
+                                rustc_middle::mir::Operand::Constant(_) => {}
                                 _ => {}
+                            },
+                            rustc_middle::mir::Rvalue::Ref(_, _, pl) => {
+                                return Some(("ref".to_string(), pl.local));
                             }
+                            _ => {}
                         }
-                    },
-                    _ => {}
+                    }
                 }
+            }
+        }
+
+        return None;
+    }
+
+    fn get_local_names(&self, lc: &Local) -> (String, String, Option<String>) {
+        let name = self.codegen_var_name(lc);
+        match self.find_debug_info(lc) {
+            None => {
+                let pretty_name = match self.get_parent_local(lc).and_then(|(op, parent_local)| {
+                    pretty_names.get(&parent_local).map(|parent_name| (op, parent_name))
+                }) {
+                    None => None,
+                    Some((op, parent_name)) => {
+                        let pretty_name = format!("{}_{}_{}", parent_name, op, lc.index());
+                        pretty_names.insert(lc, pretty_name.clone());
+                        Some(pretty_name)
+                    }
+                };
+                (name, format!("var_{}", lc.index()), pretty_name)
+            }
+            Some(info) => {
+                pretty_names.insert(lc, format!("{}", info.name));
+                (name, format!("{}", info.name), Some(format!("{}", info.name)))
             }
         }
     }
@@ -95,51 +124,20 @@ impl<'tcx> GotocCtx<'tcx> {
     fn codegen_declare_variables(&mut self) {
         let mir = self.mir();
         let ldecls = mir.local_decls();
-        let mut pretty_names: HashMap<Local, Option<String>> = HashMap::new();
+        let mut pretty_names: HashMap<Local, String> = HashMap::new();
         ldecls.indices().for_each(|lc| {
-            let (base_name, pretty_name) = match self.find_debug_info(&lc) {
-                None => (format!("var_{}", lc.index()), None),
-                Some(info) => (format!("{}", info.name), Some(format!("{}", info.name))),
-            };
-            let name = self.codegen_var_name(&lc);
+            let (name, base_name, pretty_name) = self.get_local_names(&lc);
             let ldata = &ldecls[lc];
             let t = self.monomorphize(ldata.ty);
             let t = self.codegen_ty(t);
             let loc = self.codegen_span2(&ldata.source_info.span);
             let sym =
                 Symbol::variable(name, base_name, t, self.codegen_span2(&ldata.source_info.span));
-            // TODO(TDELV): add pretty name here!
-            let pretty_name = pretty_name.or
-            match pretty_name {
+            let sym = match pretty_name {
+                None => sym,
                 Some(pretty_name) => sym.with_pretty_name(&pretty_name),
-                None => {
-                    let mut sym = sym;
-                    'outer: for bb in self.mir().basic_blocks() {
-                        for stmt in bb.statements {
-                            match stmt.kind {
-                                rustc_middle::mir::StatementKind::Assign(assgn) => {
-                                    let (lhs, rhs) = *assgn;
-                                    if lhs.local == lc {
-                                        match rhs {
-                                            rustc_middle::mir::Rvalue::Use(op) => match op {
-                                                rustc_middle::mir::Operand::Copy(pl) => {}
-                                                rustc_middle::mir::Operand::Move(pl) => {}
-                                                rustc_middle::mir::Operand::Constant(_) => {}
-                                            }
-                                            rustc_middle::mir::Rvalue::Ref(_, _, _) => {}
-                                            _ => {}
-                                        }
-                                    }
-                                },
-                                _ => {}
-                            }
-                        }
-                    }
-                    sym
-                },
             };
-            pretty_names.insert(lc, pretty_name.clone());
-            // let sym = sym.with_pretty_name("TDELVx");
+
             let sym_e = sym.to_expr();
             self.symbol_table.insert(sym);
 
