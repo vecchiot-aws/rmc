@@ -179,7 +179,11 @@ impl<'tcx> GotocCtx<'tcx> {
     pub fn fname_option(&self) -> Option<String> {
         // The function name is contained in the context member named instance,
         // and instance is defined only for function contexts.
-        self.current_fn.as_ref().map(|x| self.symbol_name(x.instance))
+        self.current_fn
+            .as_ref()
+            .map(|x| self.symbol_name(x.instance))
+            .map(|mangled| rustc_demangle::demangle(&mangled).to_string())
+            .map(|unmangled| unmangled.replace(":", "|"))
     }
 
     /// For the vtable field name, we need exactly the dyn trait name and the function
