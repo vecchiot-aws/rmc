@@ -79,8 +79,16 @@ impl<'tcx> GotocCtx<'tcx> {
             let t = self.monomorphize(ldata.ty);
             let t = self.codegen_ty(t);
             let loc = self.codegen_span2(&ldata.source_info.span);
+            let pretty_name = {
+                let mut parts = name.split("::");
+                let func = parts.next().unwrap();
+                let unmangled_func = rustc_demangle::demangle(&func).to_string();
+                let parts = std::iter::once(&unmangled_func[..]).chain(parts);
+                parts.collect::<Vec<_>>().join("::").to_string()
+            };
             let sym =
-                Symbol::variable(name, base_name, t, self.codegen_span2(&ldata.source_info.span));
+                Symbol::variable(name, base_name, t, self.codegen_span2(&ldata.source_info.span))
+                    .with_pretty_name(&pretty_name);
             let sym_e = sym.to_expr();
             self.symbol_table.insert(sym);
 
