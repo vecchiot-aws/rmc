@@ -798,12 +798,18 @@ impl<'tcx> GotocCtx<'tcx> {
             &vtable_impl_name,
             true, // REVISIT: static-scope https://github.com/model-checking/rmc/issues/10
             Type::struct_tag(&vtable_name),
-            Location::none(),
+            Location::builtin_function(&vtable_impl_name, None),
             |ctx, var| {
                 // Build the vtable
                 // See compiler/rustc_codegen_llvm/src/gotoc/typ.rs `trait_vtable_field_types` for field order
-                let drop_irep = ctx.codegen_vtable_drop_in_place();
+                let drop_irep = ctx
+                    .codegen_vtable_drop_in_place()
+                    .with_location(Location::builtin_function(&vtable_impl_name, None));
                 let (vt_size, vt_align) = ctx.codegen_vtable_size_and_align(&src_mir_type);
+                let vt_size =
+                    vt_size.with_location(Location::builtin_function(&vtable_impl_name, None));
+                let vt_align =
+                    vt_align.with_location(Location::builtin_function(&vtable_impl_name, None));
                 let mut vtable_fields = vec![drop_irep, vt_size, vt_align];
                 let concrete_type =
                     binders.principal().unwrap().with_self_ty(ctx.tcx, src_mir_type);
@@ -815,14 +821,23 @@ impl<'tcx> GotocCtx<'tcx> {
                     .unwrap();
                 // TODO: this is a temporary RMC-only flag for issue #30
                 // <https://github.com/model-checking/rmc/issues/30>
-                let is_well_formed = Expr::c_bool_constant(Type::components_are_unique(fields));
+                let is_well_formed = Expr::c_bool_constant(Type::components_are_unique(fields))
+                    .with_location(Location::builtin_function(&vtable_impl_name, None));
                 vtable_fields.push(is_well_formed);
+                let vtable_fields: Vec<_> = vtable_fields
+                    .into_iter()
+                    .map(|field| {
+                        field.with_location(Location::builtin_function(&vtable_impl_name, None))
+                    })
+                    .collect();
                 let vtable = Expr::struct_expr_from_values(
                     Type::struct_tag(&vtable_name),
                     vtable_fields,
                     &ctx.symbol_table,
-                );
-                let body = var.assign(vtable, Location::none());
+                )
+                .with_location(Location::builtin_function(&vtable_impl_name, None));
+                eprintln!("TDELV: {:?}", &vtable);
+                let body = var.assign(vtable, Location::builtin_function(&vtable_impl_name, None));
                 Some(body)
             },
         )
@@ -964,8 +979,13 @@ impl<'tcx> GotocCtx<'tcx> {
             let dst_goto_expr = src_goto_expr.cast_to(Type::void_pointer());
             let dst_goto_type = self.codegen_ty(dst_mir_type);
             let vtable = self.codegen_vtable(concrete_type, trait_type);
-            let vtable_expr = vtable.address_of();
-            Some(dynamic_fat_ptr(dst_goto_type, dst_goto_expr, vtable_expr, &self.symbol_table))
+            let vtable_loc = vtable.location().clone();
+            let vtable_expr = vtable.address_of().with_location(vtable_loc.clone());
+            let dst_goto_expr = dst_goto_expr.with_location(vtable_loc.clone());
+            Some(
+                dynamic_fat_ptr(dst_goto_type, dst_goto_expr, vtable_expr, &self.symbol_table)
+                    .with_location(vtable_loc.clone()),
+            )
         } else {
             None
         }
