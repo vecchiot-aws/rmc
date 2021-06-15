@@ -183,7 +183,6 @@ impl<'tcx> GotocCtx<'tcx> {
             .as_ref()
             .map(|x| self.symbol_name(x.instance))
             .map(|mangled| rustc_demangle::demangle(&mangled).to_string())
-            .map(|unmangled| unmangled.replace(":", "|"))
     }
 
     /// For the vtable field name, we need exactly the dyn trait name and the function
